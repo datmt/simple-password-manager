@@ -1,0 +1,92 @@
+name: Go Release Build
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger this workflow when a tag starting with 'v' is pushed (e.g., v1.0.0, v1.0.1-beta)
+
+jobs:
+  build:
+    name: Build and Release for ${{ matrix.os }} ${{ matrix.arch }}
+    runs-on: ubuntu-latest # We can use an Ubuntu runner to cross-compile for all targets
+    strategy:
+      matrix:
+        # Define the target OS and Architecture combinations
+        include:
+          # Linux builds
+          - goos: linux
+            goarch: amd64
+            output_name: password-manager-linux-amd64
+          - goos: linux
+            goarch: arm64
+            output_name: password-manager-linux-arm64
+          - goos: linux
+            goarch: arm
+            goarm: 7 # For Raspberry Pi 2/3/4
+            output_name: password-manager-linux-armv7
+          - goos: linux
+            goarch: 386
+            output_name: password-manager-linux-386
+
+          # Windows builds
+          - goos: windows
+            goarch: amd64
+            output_name: password-manager-windows-amd64.exe
+          - goos: windows
+            goarch: 386
+            output_name: password-manager-windows-386.exe
+
+          # macOS builds
+          # Note: Cross-compiling for macOS from Linux can be tricky due to CGO dependencies
+          # The `github.com/atotto/clipboard` library might require specific CGO setup.
+          # If you encounter issues, you might need a macOS runner for macOS builds.
+          # For most pure Go projects, this works. For clipboard, it *usually* works.
+          - goos: darwin
+            goarch: amd64
+            output_name: password-manager-darwin-amd64
+          - goos: darwin
+            goarch: arm64 # Apple Silicon (M1/M2/M3)
+            output_name: password-manager-darwin-arm64
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22' # Or whatever Go version your project uses
+
+      - name: Download Go Modules
+        run: go mod download
+
+      - name: Build
+        run: |
+          # Set GOARM if defined in matrix
+          if [ -n "${{ matrix.goarm }}" ]; then
+            export GOARM=${{ matrix.goarm }}
+          fi
+          
+          # Build the binary
+          env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o ${{ matrix.output_name }} .
+
+      - name: Create Archive (Zip for Windows, Tar.gz for others)
+        run: |
+          if [ "${{ matrix.goos }}" == "windows" ]; then
+            zip -r "${{ matrix.output_name }}.zip" "${{ matrix.output_name }}"
+            echo "ASSET_NAME=${{ matrix.output_name }}.zip" >> $GITHUB_ENV
+          else
+            tar -czvf "${{ matrix.output_name }}.tar.gz" "${{ matrix.output_name }}"
+            echo "ASSET_NAME=${{ matrix.output_name }}.tar.gz" >> $GITHUB_ENV
+          fi
+          echo "ASSET_PATH=${{ matrix.output_name }}.zip" >> $GITHUB_ENV # Set for Windows, will be overridden for Linux/macOS
+          echo "ASSET_PATH=${{ matrix.output_name }}.tar.gz" >> $GITHUB_ENV # Set for Linux/macOS
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') # Only upload if a tag triggered this
+        with:
+          files: ${{ env.ASSET_NAME }} # This will be the .zip or .tar.gz file
+          # The `token` input is automatically provided by GitHub Actions for release creation.
+          # You usually don't need to explicitly set secrets.GITHUB_TOKEN here.
+          # If you face permission issues, you might need to add it: token: ${{ secrets.GITHUB_TOKEN }}

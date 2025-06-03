@@ -9,6 +9,8 @@ jobs:
   build:
     name: Build and Release for ${{ matrix.os }} ${{ matrix.arch }}
     runs-on: ubuntu-latest # We can use an Ubuntu runner to cross-compile for all targets
+    permissions:
+      contents: write
     strategy:
       matrix:
         # Define the target OS and Architecture combinations
